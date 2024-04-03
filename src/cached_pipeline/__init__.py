@@ -2,17 +2,65 @@ import functools
 import inspect
 import enum
 from typing import TypeVar
+from typing import Protocol
+from typing import Generic
 from collections.abc import Coroutine
 from collections.abc import Callable
 
 
 _T = TypeVar('_T')
+_TaskReturnType = TypeVar('_TaskReturnType')
+_CacheIdType = TypeVar('_CacheIdType')
 
 
 class WhatToReturn(enum.Enum):
     NOTHING = enum.auto()
     CACHED_DATA = enum.auto()
     CALCULATED_DATA = enum.auto()
+
+
+class PipelineTask(Generic[_TaskReturnType, _CacheIdType]):
+    class _Function(Protocol):
+        def __call__(self, *args, **kwargs) -> _TaskReturnType: ...
+
+    class _ReadCacheFunction(Protocol):
+        def __call__(self, cache_id: _CacheIdType) -> _TaskReturnType: ...
+
+    class _WriteCacheFunction(Protocol):
+        def __call__(self,
+                     data: _TaskReturnType,
+                     cache_id: _CacheIdType) -> None:
+            ...
+
+    def __init__(self,
+                 func: _Function,
+                 read_cache: _ReadCacheFunction | None = None,
+                 write_cache: _WriteCacheFunction | None = None,
+                 cache_id: str | None = None):
+        self._func = func
+        self._read_cache = read_cache
+        self._write_cache = write_cache
+        if cache_id is None:
+            cache_id = func.__name__
+        self._cache_id = cache_id
+
+    def read_cache(self, func: _ReadCacheFunction) -> _ReadCacheFunction:
+        """decorates a custom read cache function"""
+        self._read_cache = func
+        return func
+
+    def write_cache(self, func: _WriteCacheFunction) -> _WriteCacheFunction:
+        """decorates a custom write cache function"""
+        self._write_cache = func
+        return func
+
+    def __call__(self, *args, **kwargs) -> _TaskReturnType:
+        data = self._func(*args, **kwargs)
+        self._write_cache(data=data, cache_id=self._cache_id)
+        return data
+
+    def cached_data(self) -> _TaskReturnType:
+        return self._read_cache(cache_id=self._cache_id)
 
 
 class CachedPipeline:
