@@ -50,13 +50,13 @@ class PipelineTask(Generic[_TaskReturnType]):
         functools.update_wrapper(self, self._func)
         return func
 
-    def read_cache(self, func: _ReadCache) -> _ReadCache:
-        """decorates a custom read cache function"""
+    def register_read_cache_method(self, func: _ReadCache) -> _ReadCache:
+        """registers a custom read-from-cache method for this Task"""
         self._read_cache = func
         return func
 
-    def write_cache(self, func: _WriteCache) -> _WriteCache:
-        """decorates a custom write cache function"""
+    def register_write_cache_method(self, func: _WriteCache) -> _WriteCache:
+        """registers a custom write-to-cache method for this Task"""
         self._write_cache = func
         return func
 
@@ -171,13 +171,13 @@ class CachedPipeline:
                     raise RuntimeError(
                         f'not clear how to handle {data_source}')
 
-                @task.read_cache
+                @task.register_read_cache_method
                 async def async_default_read_cache() -> _TaskReturnType:
                     if inspect.iscoroutinefunction(self._read_cache_func):
                         return await self._read_cache_func(cache_id=cache_id)
                     return self._read_cache_func(cache_id=cache_id)
 
-                @task.write_cache
+                @task.register_write_cache_method
                 async def async_default_write_cache(data: _TaskReturnType):
                     if inspect.iscoroutinefunction(self._write_cache_func):
                         await self._write_cache_func(
@@ -201,11 +201,11 @@ class CachedPipeline:
                     raise RuntimeError(
                         f'not clear how to handle {data_source}')
 
-                @task.read_cache
+                @task.register_read_cache_method
                 def synchronous_default_read_cache() -> _TaskReturnType:
                     return self._read_cache_func(cache_id=cache_id)
 
-                @task.write_cache
+                @task.register_write_cache_method
                 def synchronous_default_write_cache(data: _TaskReturnType):
                     self._write_cache_func(data=data, cache_id=cache_id)
 
