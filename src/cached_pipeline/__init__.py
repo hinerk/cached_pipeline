@@ -13,15 +13,25 @@ class CachedPipeline:
         self._return_cached_data = False
         self._read_cache_func = None
         self._write_cache_func = None
-        self._until_step = None
+        self._use_cache_until_task = None
 
-    def use_cache(self, until_step=None):
+    def use_cache(self, use_cache_until_task=None):
+        """
+        enable the usage of the cache for the pipeline
+
+        if parameter `use_cache_until_task` is provided, all preceding tasks in
+        the pipeline will use cached values, starting with the given one,
+        all following tasks will run without caching.
+
+        :param use_cache_until_task:
+        :return:
+        """
         self._return_cached_data = True
-        if until_step is not None:
-            if callable(until_step):
-                self._until_step = until_step.__name__
+        if use_cache_until_task is not None:
+            if callable(use_cache_until_task):
+                self._use_cache_until_task = use_cache_until_task.__name__
             else:
-                self._until_step = until_step
+                self._use_cache_until_task = use_cache_until_task
 
     def read_cache(self, func):
         self._read_cache_func = func
@@ -59,7 +69,7 @@ class CachedPipeline:
         def decorator(func: Callable[[...], _T] | Coroutine[[...], _T]):
             @functools.wraps(func)
             def sync_wrapper(*args, **kwargs):
-                if self._until_step == cache_id:
+                if self._use_cache_until_task == cache_id:
                     self._return_cached_data = False
 
                 if self._return_cached_data:
@@ -70,7 +80,7 @@ class CachedPipeline:
 
             @functools.wraps(func)
             async def async_wrapper(*args, **kwargs):
-                if self._until_step == cache_id:
+                if self._use_cache_until_task == cache_id:
                     self._return_cached_data = False
 
                 if self._return_cached_data:
