@@ -16,16 +16,16 @@ _TaskReturnType = TypeVar('_TaskReturnType')
 _CacheIdType = TypeVar('_CacheIdType')
 
 
-class _Function(Protocol):
+class _Task(Protocol):
     def __call__(self, *args, **kwargs) -> _TaskReturnType: ...
 
 
-class _ReadCacheFunction(Protocol):
+class _ReadCache(Protocol):
     def __call__(self) -> _TaskReturnType: ...
 
 
-class _WriteCacheFunction(Protocol):
-    def __call__(self,  data: _TaskReturnType) -> None: ...
+class _WriteCache(Protocol):
+    def __call__(self, data: _TaskReturnType) -> None: ...
 
 
 class SourceOfReturnedData(enum.Enum):
@@ -47,12 +47,12 @@ class PipelineTask(Generic[_TaskReturnType]):
         functools.update_wrapper(self, self._func)
         return func
 
-    def read_cache(self, func: _ReadCacheFunction) -> _ReadCacheFunction:
+    def read_cache(self, func: _ReadCache) -> _ReadCache:
         """decorates a custom read cache function"""
         self._read_cache = func
         return func
 
-    def write_cache(self, func: _WriteCacheFunction) -> _WriteCacheFunction:
+    def write_cache(self, func: _WriteCache) -> _WriteCache:
         """decorates a custom write cache function"""
         self._write_cache = func
         return func
@@ -107,12 +107,16 @@ class CachedPipeline:
         self._write_cache_func = func
         return func
 
-    def task(self, _func=None, cache_id=None) -> PipelineTask | Callable[[_Function], PipelineTask]:
+    def task(
+            self,
+            _func: _Task | None = None,
+            cache_id=None
+    ) -> PipelineTask | Callable[[_Task], PipelineTask]:
         """cache response of decorated function"""
         if cache_id is None:
             cache_id = _func.__name__
 
-        def decorator(func: _Function):
+        def decorator(func: _Task):
             if asyncio.iscoroutinefunction(func):
                 task = AsyncPipelineTask()
             else:
