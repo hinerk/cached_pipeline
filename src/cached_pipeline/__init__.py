@@ -82,6 +82,108 @@ class AsyncPipelineTask(PipelineTask):
 
 
 class CachedPipeline:
+    """
+    A thing(tm) to decide dynamically whether to use cached data instead of
+    perform the actual calculation for certain tasks in a data processing
+    pipeline.
+
+    Example
+    -------
+
+    creating a data pipeline:
+    >>> pipeline = CachedPipeline()
+
+    We will use a dict as the simplest cache possible:
+    >>> simple_cache = dict()
+
+    now we register a read and write method for interaction with the cache:
+    >>> @pipeline.write_cache
+    ... def write_cache(data, cache_id):
+    ...     simple_cache[cache_id] = data
+    ...
+    >>> @pipeline.read_cache
+    ... def load_cache(cache_id):
+    ...    return simple_cache[cache_id]
+
+    then we continue with adding tasks to the pipeline:
+
+    >>> import time
+    >>> import random
+    >>> from collections import defaultdict
+    ...
+    >>> @pipeline.task
+    ... def fetch_raw_data(size: int = 10_000):
+    ...     time.sleep(0.1)
+    ...     return [random.random() for i in range(size)]
+    ...
+    >>> @pipeline.task
+    ... def sanitize_raw_data(data: list[float], scale=23) -> list[float]:
+    ...     time.sleep(0.1)
+    ...     return [d * scale for d in data]
+    ...
+    >>> @pipeline.task
+    ... def mangle_data(data: list[float]) -> dict[int, list[float]]:
+    ...     result = defaultdict(list)
+    ...     for date in data:
+    ...         result[int(date)].append(date)
+    ...
+    ...     time.sleep(0.1)
+    ...     return {k: v for k, v in result.items()}
+    ...
+    >>> @pipeline.task
+    ... def project_results(data: dict[int, list[float]]) -> list[dict[str, int]]:
+    ...     time.sleep(0.1)
+    ...     return [{'cookies': k, 'bananas': len(v)} for k, v in data.items()]
+
+    The key used to store the results of a task in the cache default to the
+    name of the defined function. However, it is possible to specify a
+    different key via the `cache_id` parameter:
+    >>> @pipeline.task(cache_id="make_data_accessible_to_management")
+    ... def render_excel_sheet(data: list[dict[str, int]]) -> str:
+    ...     time.sleep(0.1)
+    ...     return "\\n".join(f'{d["cookies"]};{d["bananas"]}' for d in data)
+    ...
+
+    Finally, we may want to chain those functions into an actual pipeline:
+    >>> def exec_pipeline():
+    ...     begin = time.time()
+    ...     data = fetch_raw_data()
+    ...     sanitized_data = sanitize_raw_data(data)
+    ...     mangled_data = mangle_data(sanitized_data)
+    ...     projected_data = project_results(mangled_data)
+    ...     excel = render_excel_sheet(projected_data)
+    ...     duration = time.time() - begin
+    ...     logger.info(f'pipeline finished after {duration:.2f} s')
+    ...     return excel, duration
+
+    we expect the execution will take some time:
+    >>> _, duration_without_cache = exec_pipeline()
+    >>> duration_without_cache >= 0.5
+    True
+
+    we can access the cached data of a task like:
+    >>> sanitize_raw_data.cached_data()  # doctest: +ELLIPSIS
+    [...]
+
+    after activating the usage of cached data:
+    >>> pipeline.enable_caching()
+
+    the pipeline should finish quicker:
+    >>> _, duration_cached = exec_pipeline()
+    >>> duration_cached < duration_without_cache
+    True
+
+    disable the usage of cached data:
+    >>> pipeline.disable_caching()
+
+    The actual reason to write this data structure was to be able to skip a
+    bunch of tasks and head immediately to the one which requires debugging.
+    This can be achieved like:
+    >>> pipeline.skip_until_task(project_results)
+    >>> _, duration_partially_cached = exec_pipeline()
+    >>> duration_cached < duration_partially_cached < duration_without_cache
+    True
+    """
     def __init__(self):
         self._return_cached_data = False
         """remembers whether to return cached data"""
@@ -129,14 +231,55 @@ class CachedPipeline:
 
     def task(
             self,
-            _func: _Task | None = None,
+            wrapped_task: _Task | None = None,
             cache_id: _CacheIdType | None = None
     ) -> PipelineTask | Callable[[_Task], PipelineTask]:
-        """cache response of decorated function"""
+        """
+        decorates a task of the pipeline
+
+        can be used with or without arguments, like:
+        
+        >>> pipeline = CachedPipeline()
+        >>> @pipeline.task
+        ... def my_task(): ...
+        >>> @pipeline.task(cache_id="a-different-cache-id")
+        ... def my_other_task(): ...
+        
+        where for `my_task` the cache ID defaults to the function name, while
+        for `my_other_task` the cache ID is altered to "a-different-cache-id".
+        
+        :param wrapped_task: the function which shall be part of the pipeline
+        :param cache_id: the ID which is used to store and find data for
+        this function in the cache.
+        :return: wrapped_task
+        """
         if cache_id is None:
-            cache_id = _func.__name__
+            cache_id = wrapped_task.__name__
 
         def decorator(func: _Task):
+            """
+            `wrapped_task` is wrapped either in async_cache_handler or
+            synchronous_cache_handler. Both *cache_handler rely on the same
+            logic (`determine_data_source()`) which decides whether to
+            return cached data or to run `wrapped_task`. Asynchronous and
+            synchronous cache handler differ in such that the asynchronous one
+            is a coroutine and as such awaits reading and writing to cache
+            as well as awaiting `wrapped_task`.
+            Further, `cache_handler(wrapped_function)` is then wrapped in
+            either PipelineTask or AsyncPipelineTask. The purpose of
+            PipelineTask is to allow for the customization of the caching
+            methods of each step, like:
+
+            >>> pipeline = CachedPipeline()
+            >>> @pipeline.task
+            ... def my_task(): ...
+            >>> my_task.register_read_cache_method
+            ... def a_custom_read_cache_method(): ...
+
+            Finally, the registered default methods for reading and writing
+            the cache are asigned to the new PipelineTask.
+            """
+
             if asyncio.iscoroutinefunction(func):
                 task = AsyncPipelineTask()
             else:
@@ -156,7 +299,7 @@ class CachedPipeline:
                     return SourceOfReturnedData.CACHED_DATA
                 return SourceOfReturnedData.CALCULATED_DATA
 
-            if asyncio.iscoroutinefunction(func):
+            if asyncio.iscoroutinefunction(func):   # * TASK IS A COROUTINE ***
                 # noinspection PyProtectedMember
                 @task._register_cache_handler
                 @functools.wraps(func)
@@ -187,7 +330,7 @@ class CachedPipeline:
                             data=data, cache_id=cache_id)
                     return await self._write_cache_func(
                         data=data, cache_id=cache_id)
-            else:
+            else:   # # ****************************** TASK IS NO COROUTINE ***
                 # noinspection PyProtectedMember
                 @task._register_cache_handler
                 @functools.wraps(func)
@@ -219,7 +362,7 @@ class CachedPipeline:
         # allow to decorate function with or without parameter:
         # if _func is callable, then it is assumed, _func was decorated without
         # any arguments
-        if callable(_func):
-            return decorator(_func)
+        if callable(wrapped_task):
+            return decorator(wrapped_task)
 
         return decorator
