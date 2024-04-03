@@ -28,7 +28,7 @@ class _WriteCacheFunction(Protocol):
     def __call__(self,  data: _TaskReturnType) -> None: ...
 
 
-class WhatToReturn(enum.Enum):
+class SourceOfReturnedData(enum.Enum):
     NOTHING = enum.auto()
     CACHED_DATA = enum.auto()
     CALCULATED_DATA = enum.auto()
@@ -117,31 +117,35 @@ class CachedPipeline:
             else:
                 task = PipelineTask()
 
-            def what_to_return_logic():
+            def determine_data_source():
+                """
+                determines whether to actually perform the step to calculate
+                data or return cached data or return nothing at all.
+                """
                 if self._skip_until_task is not None:
                     if self._skip_until_task == cache_id:
                         self._skip_until_task = None
-                        return WhatToReturn.CACHED_DATA
-                    return WhatToReturn.NOTHING
+                        return SourceOfReturnedData.CACHED_DATA
+                    return SourceOfReturnedData.NOTHING
                 if self._return_cached_data:
-                    return WhatToReturn.CACHED_DATA
-                return WhatToReturn.CALCULATED_DATA
+                    return SourceOfReturnedData.CACHED_DATA
+                return SourceOfReturnedData.CALCULATED_DATA
 
             if asyncio.iscoroutinefunction(func):
                 @task._function
                 @functools.wraps(func)
                 async def async_wrapper(*args, **kwargs):
-                    what_to_return = what_to_return_logic()
+                    data_source = determine_data_source()
 
-                    if what_to_return == WhatToReturn.CACHED_DATA:
+                    if data_source == SourceOfReturnedData.CACHED_DATA:
                         return await task.cached_data()
-                    elif what_to_return == WhatToReturn.NOTHING:
+                    elif data_source == SourceOfReturnedData.NOTHING:
                         return None
-                    elif what_to_return == WhatToReturn.CALCULATED_DATA:
+                    elif data_source == SourceOfReturnedData.CALCULATED_DATA:
                         return await func(*args, **kwargs)
 
                     raise RuntimeError(
-                        f'not clear how to handle {what_to_return}')
+                        f'not clear how to handle {data_source}')
 
                 @task.read_cache
                 async def read_cache() -> _TaskReturnType:
@@ -158,17 +162,17 @@ class CachedPipeline:
                 @task._function
                 @functools.wraps(func)
                 def sync_wrapper(*args, **kwargs):
-                    what_to_return = what_to_return_logic()
+                    data_source = determine_data_source()
 
-                    if what_to_return == WhatToReturn.CACHED_DATA:
+                    if data_source == SourceOfReturnedData.CACHED_DATA:
                         return task.cached_data()
-                    elif what_to_return == WhatToReturn.NOTHING:
+                    elif data_source == SourceOfReturnedData.NOTHING:
                         return None
-                    elif what_to_return == WhatToReturn.CALCULATED_DATA:
+                    elif data_source == SourceOfReturnedData.CALCULATED_DATA:
                         return func(*args, **kwargs)
 
                     raise RuntimeError(
-                        f'not clear how to handle {what_to_return}')
+                        f'not clear how to handle {data_source}')
 
                 @task.read_cache
                 def read_cache() -> _TaskReturnType:
