@@ -39,44 +39,46 @@ class SourceOfReturnedData(enum.Enum):
 
 class PipelineTask(Generic[_TaskReturnType]):
     def __init__(self):
-        self._func = None
-        self._read_cache = None
-        self._write_cache = None
-        self._cache_id = None
+        self._cache_handler = None
+        """remembers the registered cache handler"""
+        self._read_cache_func = None
+        """remembers the registered read-from-cache method"""
+        self._write_cache_func = None
+        """remembers the registered write-to-cache method"""
 
-    def _register_cache_handler(self, func):
+    def _register_cache_handler(self, func: _Task) -> _Task:
         """registers the CachedPipelines cache_handler wrapping the task"""
-        self._func = func
-        functools.update_wrapper(self, self._func)
+        self._cache_handler = func
+        functools.update_wrapper(self, self._cache_handler)
         return func
 
     def register_read_cache_method(self, func: _ReadCache) -> _ReadCache:
         """registers a custom read-from-cache method for this Task"""
-        self._read_cache = func
+        self._read_cache_func = func
         return func
 
     def register_write_cache_method(self, func: _WriteCache) -> _WriteCache:
         """registers a custom write-to-cache method for this Task"""
-        self._write_cache = func
+        self._write_cache_func = func
         return func
 
     def __call__(self, *args, **kwargs) -> _TaskReturnType:
-        data = self._func(*args, **kwargs)
-        self._write_cache(data=data)
+        data = self._cache_handler(*args, **kwargs)
+        self._write_cache_func(data=data)
         return data
 
     def cached_data(self) -> _TaskReturnType:
-        return self._read_cache()
+        return self._read_cache_func()
 
 
 class AsyncPipelineTask(PipelineTask):
     async def __call__(self, *args, **kwargs) -> _TaskReturnType:
-        data = await self._func(*args, **kwargs)
-        await self._write_cache(data=data)
+        data = await self._cache_handler(*args, **kwargs)
+        await self._write_cache_func(data=data)
         return data
 
     async def cached_data(self) -> _TaskReturnType:
-        return await self._read_cache()
+        return await self._read_cache_func()
 
 
 class CachedPipeline:
@@ -158,7 +160,8 @@ class CachedPipeline:
                 # noinspection PyProtectedMember
                 @task._register_cache_handler
                 @functools.wraps(func)
-                async def async_cache_handler(*args, **kwargs):
+                async def async_cache_handler(
+                        *args, **kwargs) -> _TaskReturnType:
                     data_source = determine_data_source()
 
                     if data_source == SourceOfReturnedData.CACHED_DATA:
@@ -188,7 +191,8 @@ class CachedPipeline:
                 # noinspection PyProtectedMember
                 @task._register_cache_handler
                 @functools.wraps(func)
-                def synchronous_cache_handler(*args, **kwargs):
+                def synchronous_cache_handler(
+                        *args, **kwargs) -> _TaskReturnType:
                     data_source = determine_data_source()
 
                     if data_source == SourceOfReturnedData.CACHED_DATA:
