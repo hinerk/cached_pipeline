@@ -11,17 +11,28 @@ class CachedPipeline:
     def write_cache(self, data, cache_id):
         ...
 
-    def task(self, func):
-        cache_id = func.__name__
+    def task(self, _func=None, cache_id=None):
+        """cache response of decorated function"""
+        if cache_id is None:
+            cache_id = _func.__name__
 
-        def wrapper(*args, **kwargs):
-            if self._return_cached_data:
-                return self.read_cache(cache_id=cache_id)
+        def decorator(func):
+            def wrapper(*args, **kwargs):
+                if self._return_cached_data:
+                    return self.read_cache(cache_id=cache_id)
 
-            refined_data = func(*args, **kwargs)
+                refined_data = func(*args, **kwargs)
 
-            self.write_cache(refined_data, cache_id=cache_id)
+                self.write_cache(refined_data, cache_id=cache_id)
 
-            return refined_data
+                return refined_data
 
-        return wrapper
+            return wrapper
+
+        # allow to decorate function with or without parameter:
+        # if _func is callable, then it is assumed, _func was decorated without
+        # any arguments
+        if callable(_func):
+            return decorator(_func)
+
+        return decorator
