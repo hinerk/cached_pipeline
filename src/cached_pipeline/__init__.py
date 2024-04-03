@@ -41,7 +41,8 @@ class PipelineTask(Generic[_TaskReturnType]):
         self._write_cache = None
         self._cache_id = None
 
-    def _function(self, func):
+    def _register_cache_handler(self, func):
+        """registers the CachedPipelines cache_handler wrapping the task"""
         self._func = func
         functools.update_wrapper(self, self._func)
         return func
@@ -132,9 +133,9 @@ class CachedPipeline:
                 return SourceOfReturnedData.CALCULATED_DATA
 
             if asyncio.iscoroutinefunction(func):
-                @task._function
+                @task._register_cache_handler
                 @functools.wraps(func)
-                async def async_wrapper(*args, **kwargs):
+                async def async_cache_handler(*args, **kwargs):
                     data_source = determine_data_source()
 
                     if data_source == SourceOfReturnedData.CACHED_DATA:
@@ -148,20 +149,20 @@ class CachedPipeline:
                         f'not clear how to handle {data_source}')
 
                 @task.read_cache
-                async def read_cache() -> _TaskReturnType:
+                async def async_default_read_cache() -> _TaskReturnType:
                     if inspect.iscoroutinefunction(self._read_cache_func):
                         return await self._read_cache_func(cache_id=cache_id)
                     return self._read_cache_func(cache_id=cache_id)
 
                 @task.write_cache
-                async def write_cache(data: _TaskReturnType):
+                async def async_default_write_cache(data: _TaskReturnType):
                     if inspect.iscoroutinefunction(self._write_cache_func):
                         await self._write_cache_func(data=data, cache_id=cache_id)
                     return await self._write_cache_func(data=data, cache_id=cache_id)
             else:
-                @task._function
+                @task._register_cache_handler
                 @functools.wraps(func)
-                def sync_wrapper(*args, **kwargs):
+                def synchronous_cache_handler(*args, **kwargs):
                     data_source = determine_data_source()
 
                     if data_source == SourceOfReturnedData.CACHED_DATA:
@@ -175,11 +176,11 @@ class CachedPipeline:
                         f'not clear how to handle {data_source}')
 
                 @task.read_cache
-                def read_cache() -> _TaskReturnType:
+                def synchronous_default_read_cache() -> _TaskReturnType:
                     return self._read_cache_func(cache_id=cache_id)
 
                 @task.write_cache
-                def write_cache(data: _TaskReturnType):
+                def synchronous_default_write_cache(data: _TaskReturnType):
                     self._write_cache_func(data=data, cache_id=cache_id)
 
             self._cache_aliases[task] = cache_id
