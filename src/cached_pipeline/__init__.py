@@ -33,6 +33,11 @@ class CachedPipeline:
             else:
                 self._use_cache_until_task = use_cache_until_task
 
+    def disable_caching(self):
+        """disable the use of cached data"""
+        self._return_cached_data = False
+        self._use_cache_until_task = None
+
     def read_cache(self, func):
         self._read_cache_func = func
         return func
