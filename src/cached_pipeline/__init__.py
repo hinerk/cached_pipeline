@@ -137,6 +137,7 @@ class CachedPipeline:
                 return SourceOfReturnedData.CALCULATED_DATA
 
             if asyncio.iscoroutinefunction(func):
+                # noinspection PyProtectedMember
                 @task._register_cache_handler
                 @functools.wraps(func)
                 async def async_cache_handler(*args, **kwargs):
@@ -164,6 +165,7 @@ class CachedPipeline:
                         await self._write_cache_func(data=data, cache_id=cache_id)
                     return await self._write_cache_func(data=data, cache_id=cache_id)
             else:
+                # noinspection PyProtectedMember
                 @task._register_cache_handler
                 @functools.wraps(func)
                 def synchronous_cache_handler(*args, **kwargs):
