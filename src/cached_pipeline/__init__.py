@@ -13,19 +13,22 @@ logger = getLogger(__name__)
 
 
 _TaskReturnType = TypeVar('_TaskReturnType')
-_CacheIdType = TypeVar('_CacheIdType')
 
 
 class _Task(Protocol):
     def __call__(self, *args, **kwargs) -> _TaskReturnType: ...
 
 
+_CacheIdType = _Task | str
+
+
 class _ReadCache(Protocol):
-    def __call__(self) -> _TaskReturnType: ...
+    def __call__(self, cache_id: _CacheIdType) -> _TaskReturnType: ...
 
 
 class _WriteCache(Protocol):
-    def __call__(self, data: _TaskReturnType) -> None: ...
+    def __call__(self, data: _TaskReturnType, cache_id: _CacheIdType) -> None:
+        ...
 
 
 class SourceOfReturnedData(enum.Enum):
@@ -79,13 +82,28 @@ class AsyncPipelineTask(PipelineTask):
 class CachedPipeline:
     def __init__(self):
         self._return_cached_data = False
-        self._read_cache_func = None
-        self._write_cache_func = None
-        self._skip_until_task = None
-        self._cache_aliases = dict()
+        """remembers whether to return cached data"""
+        self._read_cache_func: _ReadCache | None = None
+        """remembers the registered default read-from-cache method"""
+        self._write_cache_func: _WriteCache | None = None
+        """remembers the registered default write-cache method"""
+        self._skip_until_task: str | None = None
+        """remembers up to which task the pipeline is skipped"""
+        self._cache_aliases: dict[_Task, str] = dict()
+        """maps task_id to actual task function"""
 
-    def skip_until_task(self, task):
-        self._skip_until_task = self._cache_aliases[task]
+    def skip_until_task(self, task: _CacheIdType):
+        """
+        skip tasks in pipeline up to given task. Cached data is returned for
+        the given task. All subsequent steps in the pipeline will run normally.
+
+        :param task: the task for which cached data is used
+        :return: nothing
+        """
+        if isinstance(task, str):
+            self._skip_until_task = task
+        else:
+            self._skip_until_task = self._cache_aliases[task]
         logger.debug("skipping execution until %s", self._skip_until_task)
 
     def enable_caching(self):
@@ -97,12 +115,12 @@ class CachedPipeline:
         self._return_cached_data = False
         self._skip_until_task = None
 
-    def read_cache(self, func):
+    def read_cache(self, func: _ReadCache):
         """decorates generic read-from-cache function"""
         self._read_cache_func = func
         return func
 
-    def write_cache(self, func):
+    def write_cache(self, func: _WriteCache):
         """decorates generic write-to-cache function"""
         self._write_cache_func = func
         return func
@@ -110,7 +128,7 @@ class CachedPipeline:
     def task(
             self,
             _func: _Task | None = None,
-            cache_id=None
+            cache_id: _CacheIdType | None = None
     ) -> PipelineTask | Callable[[_Task], PipelineTask]:
         """cache response of decorated function"""
         if cache_id is None:
@@ -162,8 +180,10 @@ class CachedPipeline:
                 @task.write_cache
                 async def async_default_write_cache(data: _TaskReturnType):
                     if inspect.iscoroutinefunction(self._write_cache_func):
-                        await self._write_cache_func(data=data, cache_id=cache_id)
-                    return await self._write_cache_func(data=data, cache_id=cache_id)
+                        await self._write_cache_func(
+                            data=data, cache_id=cache_id)
+                    return await self._write_cache_func(
+                        data=data, cache_id=cache_id)
             else:
                 # noinspection PyProtectedMember
                 @task._register_cache_handler
