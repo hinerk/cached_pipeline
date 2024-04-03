@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools", "wheel", "setuptools-git-versioning"]
+
+[project]
+name = "cached_pipeline"
+dynamic = ["version"]
+description = "datastructure for caching data within a data pipeline"
+readme = "README.md"
+authors = [
+    {name = "Hinerk Stender", email = "hinerk.stender@mail.de"},
+]
+
+[project.urls]
+Repository = "https://github.com/hinerk/cached_pipeline"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools-git-versioning]
+enabled = true
