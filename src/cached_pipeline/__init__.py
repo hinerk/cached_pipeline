@@ -63,9 +63,7 @@ class PipelineTask(Generic[_TaskReturnType]):
         return func
 
     def __call__(self, *args, **kwargs) -> _TaskReturnType:
-        data = self._cache_handler(*args, **kwargs)
-        self._write_cache_func(data=data)
-        return data
+        return self._cache_handler(*args, **kwargs)
 
     def cached_data(self) -> _TaskReturnType:
         return self._read_cache_func()
@@ -73,9 +71,7 @@ class PipelineTask(Generic[_TaskReturnType]):
 
 class AsyncPipelineTask(PipelineTask):
     async def __call__(self, *args, **kwargs) -> _TaskReturnType:
-        data = await self._cache_handler(*args, **kwargs)
-        await self._write_cache_func(data=data)
-        return data
+        return await self._cache_handler(*args, **kwargs)
 
     async def cached_data(self) -> _TaskReturnType:
         return await self._read_cache_func()
@@ -312,7 +308,9 @@ class CachedPipeline:
                     elif data_source == SourceOfReturnedData.NOTHING:
                         return None
                     elif data_source == SourceOfReturnedData.CALCULATED_DATA:
-                        return await func(*args, **kwargs)
+                        data = await func(*args, **kwargs)
+                        await task._write_cache_func(data=data)
+                        return data
 
                     raise RuntimeError(
                         f'not clear how to handle {data_source}')
@@ -343,7 +341,9 @@ class CachedPipeline:
                     elif data_source == SourceOfReturnedData.NOTHING:
                         return None
                     elif data_source == SourceOfReturnedData.CALCULATED_DATA:
-                        return func(*args, **kwargs)
+                        data = func(*args, **kwargs)
+                        task._write_cache_func(data=data)
+                        return data
 
                     raise RuntimeError(
                         f'not clear how to handle {data_source}')
